@@ -13,6 +13,9 @@
 *         команды можно вызывать серией в 1 запросе. Например http://xx.xx.xx.xx/command?3=CLICK&4=CLICK&5=ON&6=OFF
 *         только длинна строки запроса не должна привышать maxLength
 * /getdev - получить список всех устройст на 1-wire
+*         формат вывода: 
+*                T<номер устройства на шине>:<HEX адрес устройства>:<текущая температура в градусах цельсия>;[...]
+*                (пример T0:1060CF59010800E3:24.06;T1:109ABE59010800FE:24.56;)
 *
 **/
 
@@ -20,6 +23,8 @@
 #include <SPI.h>
 #include <Arduino.h>
 #include "WebServer.h" // Webduino (https://github.com/sirleech/Webduino)
+#include <OneWire.h>
+#include <DallasTemperature.h>
 
 
 byte mac[] = { 0xDE, 0xAD, 0xBE, 0xE4, 0xDE, 0x35 }; // MAC-адрес нашего устройства
@@ -33,6 +38,10 @@ byte rserver[] = { 192, 168, 10, 130 };
 // Настройки выходов
 int startPin=3;
 int endPin=9;
+
+// Pin controller for connection data pin DS18S20
+#define ONE_WIRE_BUS 2 // Digital 2 pin Arduino (куда подключен выход с шины датчиков DS18X20
+#define TEMPERATURE_PRECISION 9
 
 #define VERSION_STRING "0.1"
 #define COMPILE_DATE_STRING "2012-09-18"
@@ -53,7 +62,12 @@ int maxLength=25; // Максимальная длинна строки запр
 #define PREFIX ""
 
 WebServer webserver(PREFIX, 80);
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature sensors(&oneWire);
 
+// Для поиска
+DeviceAddress Termometers;
+float tempC; 
 
 #define NAMELEN 32
 #define VALUELEN 32
@@ -78,7 +92,6 @@ command_t const gCommandTable[COMMAND_TABLE_SIZE] = {
   {"LCLICK",     commandsLClick, }, // Кратковременная "1" на порту 3сек (время настраивается) (вызов http://xx.xx.xx.xx/command?8=LCLICK )
   {NULL,      NULL }
 };
-
 
 /**********************************************************************************************************************
  *
@@ -236,6 +249,27 @@ void parsedRequest(WebServer &server, WebServer::ConnectionType type, char *url_
 void get1wireDevices(WebServer &server, WebServer::ConnectionType type, char *url_tail, bool tail_complete)
 {
   //TODO получить все устройства на шине и выдать на страницу
+   int numberOfDevices = sensors.getDeviceCount();
+   sensors.begin();
+   for(int i=0;i<numberOfDevices; i++) {
+      if(sensors.getAddress(Termometers, i))
+      {
+          server.print("T");
+          server.print(i);
+          server.print(":");
+          for (uint8_t i = 0; i < 8; i++) {
+            if (Termometers[i] < 16) server.print("0");
+              server.print(Termometers[i], HEX);
+          }
+          float tempC = sensors.getTempC(Termometers);
+          server.print(":");
+          server.print(tempC);
+          server.print(";");
+      } else {
+            // not found
+            server.print("NOT FOUND");
+      }
+    }
 }
 
 
@@ -260,12 +294,46 @@ void infoRequest(WebServer &server, WebServer::ConnectionType type, char *url_ta
   server.print("<hr>Pin current state: ");
   strcpy (gParamBuffer, "ALL");
   commandsStatus(server);
+  server.print("<hr><a href='/getdev'>1-wire devices</a>");
   server.print("<hr>Commands:<br>");
   commandsHelp(server);
   server.print("<hr><br>Version info: ");
   server.printP(version_info);
   
 }
+
+/**********************************************************************************************************************
+* Поиск устройств (датчиков температуры на шине 1-wire)
+**/
+void searchDevices() {
+   Serial.print("Start search on 1-wire");
+   int numberOfDevices = sensors.getDeviceCount();
+   sensors.begin();
+   
+   for(int i=0;i<numberOfDevices; i++) {
+      if(sensors.getAddress(Termometers, i))
+      {
+          Serial.print("Found device ");
+	  Serial.print(i, DEC);
+          Serial.print(" with address: ");
+          for (uint8_t i = 0; i < 8; i++) {
+            if (Termometers[i] < 16) Serial.print("0");
+              Serial.print(Termometers[i], HEX);
+          }
+
+          Serial.print("Resolution actually set to: ");
+	  Serial.print(sensors.getResolution(Termometers), DEC); 
+          Serial.println();
+          float tempC = sensors.getTempC(Termometers);
+          Serial.print(tempC);
+          Serial.println("C");
+      
+      } else {
+            // not found
+      }
+    }
+}
+
 
 /**********************************************************************************************************************/
 void setup() {
@@ -275,7 +343,6 @@ void setup() {
   Serial.println("Start");
   
   Ethernet.begin(mac, ip, dns_server, gateway, subnet); // Инициализируем Ethernet Shield
-
 
   webserver.setDefaultCommand(&infoRequest); // дефолтная страница вывода (информация о контроллере)
   webserver.addCommand("command", &parsedRequest); // команды
@@ -290,6 +357,12 @@ void setup() {
   for (int thisPin = startPin; thisPin <=endPin; thisPin++)  {
     pinMode(thisPin, OUTPUT);      
   }
+  // Настройки 1-wire 
+  sensors.begin(); // Инициализация шины 1-wire (для датчиков температуры)
+  sensors.requestTemperatures(); // Перед каждым получением температуры надо ее запросить
+  
+  searchDevices();
+  
 }
 
 /**********************************************************************************************************************/
