@@ -89,6 +89,7 @@ void sendHTTPRequest() {
 void searchDevices() {
    int numberOfDevices = sensors.getDeviceCount();
    sensors.begin();
+   sensors.requestTemperatures();
    
    for(int i=0;i<numberOfDevices; i++) {
       if(sensors.getAddress(Termometers, i))
