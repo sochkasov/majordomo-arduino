@@ -251,6 +251,7 @@ void get1wireDevices(WebServer &server, WebServer::ConnectionType type, char *ur
   //TODO получить все устройства на шине и выдать на страницу
    int numberOfDevices = sensors.getDeviceCount();
    sensors.begin();
+   sensors.requestTemperatures();
    for(int i=0;i<numberOfDevices; i++) {
       if(sensors.getAddress(Termometers, i))
       {
